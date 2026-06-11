@@ -1,13 +1,19 @@
 # =============================================================================
 # APP STREAMLIT — Predicción de Anemia Infantil (ENDES 2024 Perú)
-# Archivo: app.py
-# Despliegue: Streamlit Cloud (gratis) desde GitHub
+# =============================================================================
+# Autor      : Kenny Vladim
+# Descripción: Interfaz web para predecir el riesgo de anemia en niños
+#              menores de 5 años usando un modelo Random Forest entrenado
+#              con datos de la ENDES 2024 (INEI Perú).
+# Modelo     : Pipeline(SimpleImputer → StandardScaler → RandomForestClassifier)
+# AUC-ROC    : ~0.72–0.75 (conjunto de prueba)
+# Referencia : Yimer et al. (2025); ENDES 2024 — INEI Perú
 #
-# ESTRUCTURA DE ARCHIVOS REQUERIDA EN EL REPO:
+# ESTRUCTURA DE ARCHIVOS REQUERIDA:
 #   ├── app.py                  ← este archivo
-#   ├── modelo_anemia_rf.pkl    ← exportado desde Colab (joblib)
-#   ├── predictores.json        ← exportado desde Colab (lista de 31 vars)
-#   └── requirements.txt        ← ver al final de este archivo
+#   ├── modelo_anemia_rf.pkl    ← pipeline serializado con joblib
+#   ├── predictores.json        ← lista ordenada de 31 nombres de predictores
+#   └── requirements.txt        ← dependencias del proyecto
 # =============================================================================
 
 import streamlit as st
@@ -16,7 +22,9 @@ import json
 import numpy as np
 import pandas as pd
 
-# ── Configuración de página ───────────────────────────────────────────────
+# ── Configuración de página ───────────────────────────────────────────────────
+# layout="wide" aprovecha el ancho completo para mostrar los 31 campos del
+# formulario de manera cómoda sin scroll horizontal.
 st.set_page_config(
     page_title="Predicción de Anemia Infantil · ENDES 2024",
     page_icon="🩸",
@@ -24,7 +32,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Estilos personalizados ────────────────────────────────────────────────
+# ── Estilos CSS personalizados ────────────────────────────────────────────────
+# Se inyectan estilos inline para:
+#   - Tarjetas de resultado con color semántico (rojo=alto, verde=bajo)
+#   - Títulos de sección con línea inferior roja
+#   - Texto de probabilidad de gran tamaño para lectura rápida
+#   - Sidebar con fondo rosado suave acorde al tema de salud
 st.markdown("""
 <style>
     .main-header {
@@ -83,21 +96,47 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Carga del modelo ──────────────────────────────────────────────────────
+
+# ── Carga del modelo ──────────────────────────────────────────────────────────
 @st.cache_resource
 def cargar_modelo():
+    """
+    Carga el pipeline de ML y la lista de predictores desde disco.
+
+    Usa @st.cache_resource para que el modelo se cargue una sola vez
+    por sesión del servidor, evitando re-lecturas innecesarias del .pkl
+    en cada interacción del usuario.
+
+    Returns
+    -------
+    modelo : sklearn.pipeline.Pipeline
+        Pipeline con pasos: SimpleImputer → StandardScaler → RandomForestClassifier.
+        Entrenado con scikit-learn 1.6.1 sobre ENDES 2024.
+    predictores : list of str
+        Lista ordenada con los 31 nombres de columnas en el orden exacto
+        en que el modelo fue entrenado. El orden es crítico para predict_proba.
+
+    Raises
+    ------
+    FileNotFoundError
+        Si modelo_anemia_rf.pkl o predictores.json no se encuentran
+        en el directorio de trabajo.
+    """
     modelo = joblib.load("modelo_anemia_rf.pkl")
     with open("predictores.json") as f:
         predictores = json.load(f)
     return modelo, predictores
 
+
+# Intento de carga — si falla, la app muestra error en lugar de romperse
 try:
     modelo, PREDICTORES = cargar_modelo()
     modelo_cargado = True
 except FileNotFoundError:
     modelo_cargado = False
 
-# ── Sidebar ───────────────────────────────────────────────────────────────
+
+# ── Sidebar informativo ───────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 🩸 Sobre esta app")
     st.markdown("""
@@ -110,6 +149,7 @@ with st.sidebar:
 
     ---
     """)
+    # Indicador visual del estado del modelo
     if modelo_cargado:
         st.success(f"✅ Modelo cargado  \n{len(PREDICTORES)} predictores activos")
     else:
@@ -123,23 +163,39 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-# ── Encabezado ────────────────────────────────────────────────────────────
+
+# ── Encabezado principal ──────────────────────────────────────────────────────
 st.markdown("<div class='main-header'>🩸 Predicción de Anemia Infantil</div>", unsafe_allow_html=True)
 st.markdown("<div class='sub-header'>ENDES 2024 · Perú · Modelo Random Forest · 31 predictores</div>", unsafe_allow_html=True)
 
+# Detener ejecución si el modelo no está disponible
 if not modelo_cargado:
     st.error("⚠️ El modelo no está disponible. Sube `modelo_anemia_rf.pkl` y `predictores.json` al repositorio.")
     st.stop()
 
-# ═══════════════════════════════════════════════════════════════════════════
+
+# =============================================================================
 # FORMULARIO DE INGRESO DE DATOS
-# ═══════════════════════════════════════════════════════════════════════════
+# =============================================================================
+# El formulario está organizado en 7 bloques temáticos siguiendo el orden
+# lógico de la encuesta ENDES y la ficha clínica pediátrica:
+#   1. Niño          — edad, sexo, estado nutricional
+#   2. Hogar         — altitud, área, región, riqueza
+#   3. Agua/Saneam.  — agua, desagüe, combustible
+#   4. Madre         — educación, trabajo, seguro, hemoglobina, prenatal
+#   5. Gestación     — hierro en embarazo, peso al nacer
+#   6. Salud infant. — morbilidad reciente, vitamina A, antiparasitarios
+#   7. Suplementación— SIS niño, hierro jarabe, micronutrientes, CRED
+# =============================================================================
 st.markdown("### 📋 Datos del niño y su entorno")
 st.caption("Completa los 31 campos y presiona **Predecir** para obtener el resultado.")
 
 with st.form("form_prediccion"):
 
-    # ── BLOQUE 1: NIÑO ────────────────────────────────────────────────────
+    # ── BLOQUE 1: NIÑO ────────────────────────────────────────────────────────
+    # Variables antropométricas y demográficas del niño índice.
+    # stunting y wasting se derivan de z-scores OMS; son fuertes predictores
+    # de anemia por la relación entre desnutrición crónica y déficit de hierro.
     st.markdown("<div class='section-title'>👶 Características del niño</div>", unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -167,7 +223,10 @@ with st.form("form_prediccion"):
             help="Z-score peso/talla < −2.0 = desnutrición aguda.")
         wasting = wasting[0]
 
-    # ── BLOQUE 2: HOGAR ───────────────────────────────────────────────────
+    # ── BLOQUE 2: HOGAR ───────────────────────────────────────────────────────
+    # Variables del contexto socioeconómico y geográfico del hogar.
+    # La altitud es crítica en Perú: a mayor altitud se ajusta el punto de
+    # corte de hemoglobina, aumentando la prevalencia real de anemia.
     st.markdown("<div class='section-title'>🏠 Características del hogar</div>", unsafe_allow_html=True)
     c5, c6, c7, c8, c9 = st.columns(5)
     with c5:
@@ -197,7 +256,10 @@ with st.form("form_prediccion"):
             format_func=lambda x: x[1], index=1)
         indice_riqueza = indice_riqueza[0]
 
-    # ── BLOQUE 3: AGUA Y SANEAMIENTO ──────────────────────────────────────
+    # ── BLOQUE 3: AGUA Y SANEAMIENTO ─────────────────────────────────────────
+    # Determinantes ambientales de salud. El acceso a agua segura y
+    # saneamiento reduce la carga de infecciones intestinales que
+    # interfieren con la absorción de hierro.
     st.markdown("<div class='section-title'>💧 Agua, saneamiento y combustible</div>", unsafe_allow_html=True)
     c10, c11, c12 = st.columns(3)
     with c10:
@@ -219,7 +281,10 @@ with st.form("form_prediccion"):
             format_func=lambda x: x[1])
         comb_limpio = comb_limpio[0]
 
-    # ── BLOQUE 4: MADRE ───────────────────────────────────────────────────
+    # ── BLOQUE 4: MADRE ───────────────────────────────────────────────────────
+    # Características maternas. La hemoglobina materna es un predictor
+    # proxy de la reserva de hierro transferida al feto durante la gestación.
+    # Se registra como valor continuo × 10 (ej. 130 = 13.0 g/dL).
     st.markdown("<div class='section-title'>👩 Características de la madre</div>", unsafe_allow_html=True)
     c13, c14, c15, c16 = st.columns(4)
     with c13:
@@ -266,7 +331,10 @@ with st.form("form_prediccion"):
             format_func=lambda x: x[1])
         sin_ctrl_prenatal = sin_ctrl_prenatal[0]
 
-    # ── BLOQUE 5: GESTACIÓN ───────────────────────────────────────────────
+    # ── BLOQUE 5: GESTACIÓN Y NACIMIENTO ─────────────────────────────────────
+    # El suplemento de hierro en el embarazo protege las reservas fetales.
+    # El bajo peso al nacer (<2500 g) se asocia con reservas de hierro
+    # insuficientes al momento del nacimiento.
     st.markdown("<div class='section-title'>🤰 Gestación y nacimiento</div>", unsafe_allow_html=True)
     c20, c21 = st.columns(2)
     with c20:
@@ -282,7 +350,10 @@ with st.form("form_prediccion"):
             format_func=lambda x: x[1])
         bajo_peso_nacer = bajo_peso_nacer[0]
 
-    # ── BLOQUE 6: SALUD INFANTIL ──────────────────────────────────────────
+    # ── BLOQUE 6: SALUD INFANTIL ──────────────────────────────────────────────
+    # Morbilidad reciente (últimas 2 semanas). La diarrea e IRA aumentan
+    # las pérdidas de hierro y reducen su absorción intestinal.
+    # vitamina_a y antiparasit son intervenciones MINSA que modulan el riesgo.
     st.markdown("<div class='section-title'>🏥 Salud infantil reciente (últimas 2 semanas)</div>", unsafe_allow_html=True)
     c22, c23, c24, c25, c26 = st.columns(5)
     with c22:
@@ -317,7 +388,11 @@ with st.form("form_prediccion"):
             format_func=lambda x: x[1])
         antiparasit = antiparasit[0]
 
-    # ── BLOQUE 7: SEGURO Y SUPLEMENTACIÓN ─────────────────────────────────
+    # ── BLOQUE 7: SEGURO Y SUPLEMENTACIÓN ────────────────────────────────────
+    # Variables de intervención del sistema de salud peruano.
+    # hierro_7d y micronut_minsa capturan la adherencia reciente a la
+    # suplementación preventiva del MINSA (Estrategia Nacional de Anemia).
+    # hb_materna_falta es un indicador de dato faltante imputado en el modelo.
     st.markdown("<div class='section-title'>💊 Seguro y suplementación (Perú)</div>", unsafe_allow_html=True)
     c27, c28, c29, c30, c31 = st.columns(5)
     with c27:
@@ -355,18 +430,23 @@ with st.form("form_prediccion"):
             help="S466: el niño tiene sus controles CRED al día.")
         cred = cred[0]
 
-    # ── BOTÓN DE PREDICCIÓN ───────────────────────────────────────────────
+    # ── BOTÓN DE PREDICCIÓN ───────────────────────────────────────────────────
     st.markdown("---")
     submitted = st.form_submit_button(
         "🔍 Predecir riesgo de anemia",
         use_container_width=True,
         type="primary")
 
-# ═══════════════════════════════════════════════════════════════════════════
-# PREDICCIÓN Y RESULTADO
-# ═══════════════════════════════════════════════════════════════════════════
+
+# =============================================================================
+# PREDICCIÓN Y VISUALIZACIÓN DEL RESULTADO
+# =============================================================================
 if submitted:
-    # Construir vector de entrada en el orden exacto de PREDICTORES
+    # ── 1. Construcción del vector de entrada ─────────────────────────────────
+    # Se arma un diccionario con los 31 valores capturados en el formulario.
+    # Luego se reordena según PREDICTORES (orden exacto de entrenamiento)
+    # para garantizar que cada columna coincida con lo que el modelo espera.
+    # Un orden incorrecto produciría predicciones silenciosamente erróneas.
     valores = {
         'edad_meses':              edad_meses,
         'sexo_nino':               sexo_nino,
@@ -401,21 +481,26 @@ if submitted:
         'hb_materna_falta':        hb_materna_falta,
     }
 
-    # Reordenar según el orden exacto del modelo
+    # DataFrame con una sola fila, columnas en el orden exacto del modelo
     X_input = pd.DataFrame([[valores[p] for p in PREDICTORES]], columns=PREDICTORES)
 
-    # Predicción
+    # ── 2. Inferencia ─────────────────────────────────────────────────────────
+    # predict_proba devuelve [[prob_clase_0, prob_clase_1]]
+    # Se toma el índice [0, 1] = probabilidad de anemia (clase positiva)
     proba = modelo.predict_proba(X_input)[0, 1]
     prob_pct = proba * 100
-    clase = "ALTO" if proba >= 0.5 else "BAJO"
+    clase = "ALTO" if proba >= 0.5 else "BAJO"   # umbral estándar 50%
 
-    # ── Mostrar resultado ─────────────────────────────────────────────────
+    # ── 3. Visualización del resultado ────────────────────────────────────────
     st.markdown("---")
     st.markdown("## 📊 Resultado de la predicción")
 
     col_res, col_gauge = st.columns([1.5, 1])
 
     with col_res:
+        # Tarjeta de resultado con color semántico:
+        #   Rojo  → Riesgo ALTO  (proba ≥ 0.50)
+        #   Verde → Riesgo BAJO  (proba < 0.50)
         if clase == "ALTO":
             st.markdown(f"""
             <div class='result-card-alto'>
@@ -436,32 +521,42 @@ if submitted:
             """, unsafe_allow_html=True)
 
     with col_gauge:
-        # Barra de probabilidad visual con st.progress
+        # Medidor visual de probabilidad con barra de progreso nativa de Streamlit
         st.markdown("#### Probabilidad de anemia")
-        st.metric(label="Probabilidad", value=f"{prob_pct:.1f}%",
-                  delta=f"{'↑ Por encima' if proba >= 0.5 else '↓ Por debajo'} del umbral (50%)")
+        st.metric(
+            label="Probabilidad",
+            value=f"{prob_pct:.1f}%",
+            delta=f"{'↑ Por encima' if proba >= 0.5 else '↓ Por debajo'} del umbral (50%)"
+        )
         st.progress(float(proba))
         st.caption("Umbral de clasificación: 50%")
 
-    # ── Tabla de factores de riesgo identificados ─────────────────────────
+    # ── 4. Tabla de factores de riesgo presentes ──────────────────────────────
+    # Se revisan manualmente 14 factores clínicamente relevantes.
+    # Esta sección es interpretativa, no sale directamente del modelo,
+    # pero ayuda al usuario a entender qué variables están contribuyendo
+    # al riesgo en el caso específico ingresado.
     with st.expander("🔎 Ver factores de riesgo identificados en este caso"):
         factores_riesgo = {
-            "Desnutrición crónica (stunting)": stunting == 1,
-            "Desnutrición aguda (wasting)": wasting == 1,
-            "Bajo peso al nacer": bajo_peso_nacer == 1,
-            "Sin control prenatal": sin_ctrl_prenatal == 1,
-            "Sin suplemento de hierro en embarazo": hierro_emb == 0,
-            "Sin micronutrientes MINSA (últimos 7 días)": micronut_minsa == 0,
-            "Sin hierro jarabe (últimos 7 días)": hierro_7d == 0,
-            "Agua no mejorada": agua_mejorada == 0,
-            "Saneamiento no mejorado": san_mejorado == 0,
-            "Combustible no limpio": comb_limpio == 0,
-            "Diarrea reciente": diarrea == 1,
-            "IRA reciente": ira == 1,
-            "Hemoglobina materna baja (<110 g/dL×10)": hb_materna < 110,
-            "Hogar muy pobre": indice_riqueza == 1,
+            "Desnutrición crónica (stunting)":           stunting == 1,
+            "Desnutrición aguda (wasting)":              wasting == 1,
+            "Bajo peso al nacer":                        bajo_peso_nacer == 1,
+            "Sin control prenatal":                      sin_ctrl_prenatal == 1,
+            "Sin suplemento de hierro en embarazo":      hierro_emb == 0,
+            "Sin micronutrientes MINSA (últimos 7 días)":micronut_minsa == 0,
+            "Sin hierro jarabe (últimos 7 días)":        hierro_7d == 0,
+            "Agua no mejorada":                          agua_mejorada == 0,
+            "Saneamiento no mejorado":                   san_mejorado == 0,
+            "Combustible no limpio":                     comb_limpio == 0,
+            "Diarrea reciente":                          diarrea == 1,
+            "IRA reciente":                              ira == 1,
+            "Hemoglobina materna baja (<110 g/dL×10)":  hb_materna < 110,
+            "Hogar muy pobre":                           indice_riqueza == 1,
         }
+
+        # Filtrar solo los factores presentes en este caso
         presentes = {k: v for k, v in factores_riesgo.items() if v}
+
         if presentes:
             df_factores = pd.DataFrame(
                 {"Factor de riesgo": list(presentes.keys()),
@@ -471,6 +566,7 @@ if submitted:
         else:
             st.success("No se identificaron factores de riesgo críticos en este caso.")
 
+    # ── 5. Disclaimer final ───────────────────────────────────────────────────
     st.markdown("""
     <div class='disclaimer'>
     ⚠️ Esta predicción es de carácter investigativo/educativo basada en ENDES 2024.
