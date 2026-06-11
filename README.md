@@ -208,7 +208,7 @@ Los 31 predictores están organizados en 7 bloques temáticos:
 
 ## 👤 Autor
 
-**Kenny Vladim**  
+**Kenny Mallqui**  
 📧 Contacto vía [GitHub](https://github.com/kennyvladim)
 
 ---
