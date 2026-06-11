@@ -1,7 +1,7 @@
 # =============================================================================
 # APP STREAMLIT — Predicción de Anemia Infantil (ENDES 2024 Perú)
 # =============================================================================
-# Autor      : Kenny Vladim
+# Autor      : Kenny Mallqui
 # Descripción: Interfaz web para predecir el riesgo de anemia en niños
 #              menores de 5 años usando un modelo Random Forest entrenado
 #              con datos de la ENDES 2024 (INEI Perú).
